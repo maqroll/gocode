@@ -1,0 +1,2 @@
+# gocode
+Some go code.
