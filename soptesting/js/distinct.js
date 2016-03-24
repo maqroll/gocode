@@ -1,0 +1,1 @@
+document.getElementById("distinct").innerHTML = location.origin;

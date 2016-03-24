@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SOP-TESTING</title>
+  <link rel="stylesheet" href="http://localhost:9091/css/test.css">
+</head>
+<body>
+    <div class="ok">css loaded from remote</div><br/>
+    <div>location of inline script: <div class="result" id="inline"></div></div><br/>
+    <div>location of remote script (same origin): <div class="result" id="same"></div></div><br/>
+    <div>location of remote script (distinct origin): <div class="result" id="distinct"></div></div><br/>
+    <!-- insertar imagen de otro origen -->
+    <!-- insertar imagen de otro origen -->
+    <!-- llamadas ajax tanto desde inline -->
+    <!-- llamadas ajax desde la misma localizacion -->
+    <!-- llamadas ajax desde otra localización -->
+<script>
+    document.getElementById("inline").innerHTML = location.origin;
+    // every frame tries to add a '+' (just one gets added)
+    parent.document.getElementById("iframe").innerHTML= parent.document.getElementById("iframe").innerHTML + "+";
+</script>
+<script src="http://localhost:9090/js/same.js"></script>
+<script src="http://localhost:9091/js/distinct.js"></script>
+</body>
+</html>

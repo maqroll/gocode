@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SOP-TESTING</title>
+  <link rel="stylesheet" href="http://localhost:9091/css/test.css">
+</head>
+<body>
+    <div class="ok">css loaded from remote</div><br/>
+    <div>location of inline script: <div class="result" id="inline"></div></div><br/>
+    <div>location of remote script (same origin): <div class="result" id="same"></div></div><br/>
+    <div>location of remote script (distinct origin): <div class="result" id="distinct"></div></div><br/>
+    <div>access parent from iframe : <div class="result" id="iframe"></div></div><br/>
+    <!-- same origin image -->
+    <img src="http://localhost:9090/img/gopher.png"/>
+    <!-- distinct origin image -->
+    <img src="http://localhost:9091/img/gopher.png"/>
+    <br/>
+    <!-- llamadas ajax tanto desde inline -->
+    <div>GET with result (same origin) : <div class="result" id="get-same"></div></div><br/>    
+    <div>GET with result (distinct origin) : <div class="result" id="get-distinct"></div></div><br/>    
+    <div>GET without result (distinct origin) : <div class="result" id="get-wo-distinct"></div></div><br/>    
+    <div>GET CORS (distinct origin) : <div class="result" id="get-distinct-cors"></div></div><br/>    
+    <div>GET complex (distinct origin) : <div class="result" id="get-distinct-complex"></div></div><br/>    
+    <div>GET complex CORS (distinct origin) : <div class="result" id="get-distinct-complex-cors"></div></div><br/>    
+    <!-- llamadas ajax desde la misma localizacion -->
+    <!-- llamadas ajax desde otra localización -->
+
+<!-- distinct origin iframe -->    
+<iframe style="height: 300px;background-color: coral;" src="http://localhost:9091/frame.html">
+</iframe>
+<!-- same origin iframe -->
+<iframe style="height: 300px;background-color: gray;" src="http://localhost:9090/frame.html">
+</iframe>
+<script>
+    document.getElementById("inline").innerHTML = location.origin;
+</script>
+<script src="http://localhost:9090/js/same.js"></script>
+<script src="http://localhost:9091/js/distinct.js"></script>
+<script src="http://localhost:9090/js/same-ajax.js"></script>
+<script src="http://localhost:9091/js/distinct-ajax.js"></script>
+</body>
+</html>
