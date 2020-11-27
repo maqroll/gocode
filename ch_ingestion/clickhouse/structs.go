@@ -2,9 +2,11 @@ package clickhouse
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -18,7 +20,48 @@ type clusterNode struct {
 	ch          *clickhouseType
 }
 
-type clusterInfo []clusterNode
+type clusterInfo []*clusterNode
+
+//-----------------------------------------------------------
+
+type responseType struct {
+	nodeF  string
+	queryF string
+	errF   string
+}
+
+func (r responseType) node() string {
+	return r.nodeF
+}
+
+func (r responseType) query() string {
+	return r.queryF
+}
+
+func (r responseType) err() string {
+	return r.errF
+}
+
+//-----------------------------------------------------------
+
+type commandType struct {
+	node  *clusterNode
+	query []string
+}
+
+func (command commandType) exec() (res response) {
+	for _, query := range command.query {
+		stderr := command.node.ch.captureErr(query)
+		if stderr != "" {
+			return &responseType{
+				nodeF:  fmt.Sprintf("%s:%d", command.node.hostName, command.node.port),
+				queryF: query,
+				errF:   stderr,
+			}
+		}
+	}
+	return nil
+}
 
 //-----------------------------------------------------------
 
@@ -39,6 +82,88 @@ func (table tableIDType) getLoadingPrefix() string {
 	return fmt.Sprintf("%s_loading_", table.Name())
 }
 
+//----------------------------------------------------------------------------------
+
+// si queremos evitar acceso a los campos de workers desde fuera de workers
+// ¿tengo que crear un nuevo paquete? ¿definir una interfaz?
+type workersType struct {
+	input   chan command
+	output  []chan response
+	failed  []response
+	waiting chan struct{}
+}
+
+func (w *workersType) start(n uint) {
+	w.input = make(chan command, n)
+	w.output = make([]chan response, 0, n)
+	w.waiting = make(chan struct{})
+
+	for i := 0; i < int(n); i++ {
+		input := w.input
+		outputChannel := make(chan response, 10)
+		w.output = append(w.output, outputChannel)
+
+		go func() {
+			for {
+				select {
+				case com, ok := <-input:
+					if !ok {
+						close(outputChannel)
+						return
+					}
+					resp := com.exec()
+
+					if resp != nil {
+						outputChannel <- resp
+					}
+				}
+			}
+		}()
+
+	}
+
+	responses := w.output
+
+	go func() {
+		defer w.stop()
+		closed := 0
+		cases := make([]reflect.SelectCase, len(responses))
+		for i, ch := range responses {
+			cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
+		}
+
+		for {
+			chosen, r, ok := reflect.Select(cases)
+			if !ok {
+				// handle closed channels
+				cases = append(cases[:chosen], cases[chosen+1:]...)
+				closed++
+				if closed == len(responses) {
+					return
+				}
+				continue
+			}
+			response, _ := r.Interface().(response)
+			if response.err() != "" {
+				w.failed = append(w.failed, response)
+			}
+		}
+	}()
+}
+
+func (w *workersType) stop() {
+	close(w.waiting)
+}
+
+func (w *workersType) sendCommand(c command) {
+	w.input <- c
+}
+
+func (w *workersType) getFailedCommands() []response {
+	<-w.waiting // block until all commands finished
+	return w.failed
+}
+
 //------------------------------------------------------------------------------------
 
 type clickhouseType struct {
@@ -49,8 +174,6 @@ type clickhouseType struct {
 	main bool
 }
 
-// TODO el receptor debería ser un puntero??
-
 func (ch clickhouseType) printQuery(query string) {
 	if !ch.main {
 		log.Printf("-- @%s:%d", ch.host, ch.port)
@@ -60,8 +183,15 @@ func (ch clickhouseType) printQuery(query string) {
 }
 
 func (ch clickhouseType) cmd(query string) (cmd *exec.Cmd) {
+	cmd = ch.cmdWithStderr(query, true)
+	return
+}
+
+func (ch clickhouseType) cmdWithStderr(query string, setStderr bool) (cmd *exec.Cmd) {
 	cmd = exec.Command("docker", "exec", "-i", "clickhouse-cluster_clickhouse-ch3_1", "clickhouse-client", "-h", ch.host, "--port", strconv.Itoa(int(ch.port)), "-q", query)
-	cmd.Stderr = os.Stderr
+	if setStderr {
+		cmd.Stderr = os.Stderr
+	}
 	return
 }
 
@@ -91,14 +221,27 @@ func (ch clickhouseType) LoaderFor(tbl TableID) (res Loader) {
 	}
 }
 
-// TODO common factor between Exec() y Pipe()
-func (ch clickhouseType) Exec(query string) {
-	cmd := ch.cmd(query)
+func (ch clickhouseType) captureErr(query string) (res string) {
+	cmd := ch.cmdWithStderr(query, false)
 
-	ch.printQuery(query)
-	if err := cmd.Run(); err != nil {
-		os.Exit(-1)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	if err := cmd.Start(); err != nil {
+		return "Failed to start process"
+	}
+
+	b, _ := ioutil.ReadAll(stderr)
+	res = string(b)
+
+	err = cmd.Wait()
+	if err != nil && res != "" {
+		res = "Unspecified problem running command"
+	}
+
+	return
 }
 
 func (ch clickhouseType) Result(query string) (res string) {
@@ -113,13 +256,23 @@ func (ch clickhouseType) Result(query string) (res string) {
 	return
 }
 
-func (ch clickhouseType) Pipe(query string) {
+func (ch clickhouseType) run(query string, withStdin bool) {
 	cmd := ch.cmd(query)
 
-	cmd.Stdin = os.Stdin
+	if withStdin {
+		cmd.Stdin = os.Stdin
+	}
 
 	ch.printQuery(query)
 	if err := cmd.Run(); err != nil {
 		os.Exit(-1)
 	}
+}
+
+func (ch clickhouseType) Pipe(query string) {
+	ch.run(query, true)
+}
+
+func (ch clickhouseType) Exec(query string) {
+	ch.run(query, false)
 }

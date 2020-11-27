@@ -79,15 +79,37 @@ func processPendingTablesDist(server Clickhouse, tableID TableID, pendingTables 
 func movePartitionsToFinalTableDist(server Clickhouse, pendingID TableID, sourceID TableID, cluster string, cInfo clusterInfo) {
 	partitions := getPartitionsOnCluster(server, pendingID, cluster)
 
+	workers := &workersType{}
+	workers.start(10)
+
 	for _, node := range cInfo {
 		for _, partID := range partitions {
-			node.ch.Exec(fmt.Sprintf("ALTER TABLE %s.%s ATTACH PARTITION ID '%s' FROM %s.%s", sourceID.Db(), sourceID.Name(), partID, pendingID.Db(), pendingID.Name()))
-			node.ch.Exec(fmt.Sprintf("ALTER TABLE %s.%s DROP PARTITION ID '%s'", pendingID.Db(), pendingID.Name(), partID))
+			attachQuery := fmt.Sprintf("ALTER TABLE %s.%s ATTACH PARTITION ID '%s' FROM %s.%s", sourceID.Db(), sourceID.Name(), partID, pendingID.Db(), pendingID.Name())
+			dropQuery := fmt.Sprintf("ALTER TABLE %s.%s DROP PARTITION ID '%s'", pendingID.Db(), pendingID.Name(), partID)
+
+			workers.sendCommand(&commandType{
+				node:  node,
+				query: []string{attachQuery, dropQuery},
+			})
 		}
+	}
+
+	close(workers.input)
+	failedCommands := workers.getFailedCommands()
+
+	if len(failedCommands) > 0 {
+		for _, response := range failedCommands {
+			log.Printf("--@%s", response.node())
+			log.Printf("%s", response.query())
+			log.Printf("%s", response.err())
+		}
+		os.Exit(-1)
+	} else {
+		log.Printf("-- Moved partitions to final table on cluster without errors")
 	}
 }
 
-func processPendingTables(server Clickhouse, tableID TableID, pendingTables []TableID) {
+func processPendingTables(server *clickhouseType, tableID TableID, pendingTables []TableID) {
 	for _, pendingTable := range pendingTables {
 		movePartitionsToFinalTable(server, tableID, pendingTable)
 		dropTable(server, pendingTable)
@@ -119,14 +141,36 @@ func getPartitions(server Clickhouse, tableID TableID) (res []string) {
 	return getPartitionsOnCluster(server, tableID, "")
 }
 
-func movePartitionsToFinalTable(server Clickhouse, tableID TableID, pending TableID) {
+func movePartitionsToFinalTable(server *clickhouseType, tableID TableID, pending TableID) {
 	partitions := getPartitions(server, pending)
+
+	workers := &workersType{}
+	workers.start(20)
 
 	for _, partID := range partitions {
 		attach := fmt.Sprintf("ALTER TABLE %s.%s ATTACH PARTITION ID '%s' FROM %s.%s", tableID.Db(), tableID.Name(), partID, pending.Db(), pending.Name())
-		server.Exec(attach)
 		drop := fmt.Sprintf("ALTER TABLE %s.%s DROP PARTITION ID '%s'", pending.Db(), pending.Name(), partID)
-		server.Exec(drop)
+
+		workers.sendCommand(&commandType{
+			node: &clusterNode{
+				ch: server,
+			},
+			query: []string{attach, drop},
+		})
+	}
+
+	close(workers.input)
+	failedCommands := workers.getFailedCommands()
+
+	if len(failedCommands) > 0 {
+		for _, response := range failedCommands {
+			log.Println("--")
+			log.Printf("%s", response.query())
+			log.Printf("%s", response.err())
+		}
+		os.Exit(-1)
+	} else {
+		log.Printf("-- Moved partitions to final table without errors")
 	}
 }
 

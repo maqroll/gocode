@@ -19,3 +19,18 @@ type Clickhouse interface {
 	Result(cmd string) string
 	Pipe(cmd string)
 }
+
+type command interface {
+	exec() response
+}
+
+type response interface {
+	node() string
+	query() string
+	err() string
+}
+
+type workers interface {
+	sendCommand(c command)
+	getFailedCommands() []response
+}

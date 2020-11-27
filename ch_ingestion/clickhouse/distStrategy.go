@@ -83,7 +83,6 @@ func (strategy *distStrategyType) Load(format string, pending string) {
 
 	strategy.server.Pipe(fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", distLoadingTable.Db(), distLoadingTable.Name(), format))
 
-	// TODO execute this in parallel?? harder to visualize in console
 	movePartitionsToFinalTableDist(strategy.server, shardLoadingTable, strategy.shard, strategy.cluster, strategy.clusterNodes)
 
 	dropLoadingTablesDist(strategy.server, []TableID{distLoadingTable}, strategy.cluster)
@@ -120,7 +119,7 @@ func (strategy *distStrategyType) populateClusterInfo() {
 	query := fmt.Sprintf("SELECT cluster, shard_num, shard_weight, host_name, host_address, port FROM system.clusters WHERE cluster = '%s' FORMAT CSV", strategy.cluster)
 	clusterInfo := strategy.server.Result(query)
 
-	strategy.clusterNodes = make([]clusterNode, 0, 5)
+	strategy.clusterNodes = make([]*clusterNode, 0, 5)
 
 	r := csv.NewReader(strings.NewReader(string(clusterInfo)))
 
@@ -138,7 +137,7 @@ func (strategy *distStrategyType) populateClusterInfo() {
 		shardNum, _ := strconv.Atoi(record[1])
 		shardWeight, _ := strconv.Atoi(record[2])
 
-		node := clusterNode{
+		node := &clusterNode{
 			hostName:    record[3],
 			hostAddress: record[4],
 			port:        uint(port),
