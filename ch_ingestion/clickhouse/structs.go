@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
-	"strconv"
 	"strings"
 )
 
@@ -172,6 +171,7 @@ type clickhouseType struct {
 	user string
 	pwd  string
 	main bool
+	cli  []string
 }
 
 func (ch clickhouseType) printQuery(query string) {
@@ -188,7 +188,8 @@ func (ch clickhouseType) cmd(query string) (cmd *exec.Cmd) {
 }
 
 func (ch clickhouseType) cmdWithStderr(query string, setStderr bool) (cmd *exec.Cmd) {
-	cmd = exec.Command("docker", "exec", "-i", "clickhouse-cluster_clickhouse-ch3_1", "clickhouse-client", "-h", ch.host, "--port", strconv.Itoa(int(ch.port)), "-q", query)
+	cli := append(ch.cli, "-q", query)
+	cmd = exec.Command(cli[0], cli[1:]...)
 	if setStderr {
 		cmd.Stderr = os.Stderr
 	}
@@ -237,7 +238,7 @@ func (ch clickhouseType) captureErr(query string) (res string) {
 	res = string(b)
 
 	err = cmd.Wait()
-	if err != nil && res != "" {
+	if err != nil && res == "" {
 		res = "Unspecified problem running command"
 	}
 
