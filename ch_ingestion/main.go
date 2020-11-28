@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"os"
 
 	ch "./clickhouse"
 )
@@ -20,6 +22,14 @@ var (
 
 func init() {
 	log.SetFlags(0)
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Pipe your input file into ch_ingestion and it will try to update your table atomically. 
+If something goes wrong will stop the ingestion and will show the faulty command.
+
+Params:
+`)
+		flag.PrintDefaults()
+	}
 }
 
 func main() {
