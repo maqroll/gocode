@@ -10,14 +10,16 @@ import (
 )
 
 var (
-	host    = flag.String("host", "localhost", "clickhouse server host")
-	port    = flag.Int("port", 9000, "clickhouse server port")
 	table   = flag.String("tbl", "", "table to ingest")
 	db      = flag.String("db", "default", "database")
 	pending = flag.String("pending", ch.StopOption, "action for pending tables: "+ch.StopOption+","+ch.ProcessOption+","+ch.DeleteOption)
 	format  = flag.String("format", "CSV", "input format, any accepted by clickhouse")
-	user    = flag.String("user", "default", "clickhouse user")
-	pwd     = flag.String("pwd", "", "clickhouse pwd")
+
+	cli  = flag.String("cli", "clickhouse-client", "clickhouse-client executable")
+	host = flag.String("host", "localhost", "clickhouse server host")
+	port = flag.Int("port", 9000, "clickhouse server port")
+	user = flag.String("user", "default", "clickhouse user")
+	pwd  = flag.String("pwd", "", "clickhouse pwd")
 )
 
 func init() {
@@ -38,7 +40,7 @@ func main() {
 
 	checkParams()
 
-	server := ch.NewClickhouse(*host, uint(*port), *user, *pwd)
+	server := ch.NewClickhouse(*host, uint(*port), *user, *pwd, *cli)
 	tableID := ch.NewTableID(*db, *table)
 
 	loadStrategy := server.LoaderFor(tableID)
