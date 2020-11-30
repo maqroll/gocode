@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	ch "./clickhouse"
+	ch "github.com/maqroll/gocode/ch_ingestion/clickhouse"
 )
 
 var (
