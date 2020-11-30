@@ -5,18 +5,21 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type distStrategyType struct {
-	server       *clickhouseType
-	engine       string
-	cluster      string
-	shard        TableID
-	shardingKey  string
-	clusterNodes clusterInfo
+	server            *clickhouseType
+	engine            string
+	cluster           string
+	shard             TableID
+	shardingKey       string
+	clusterNodes      clusterInfo
+	distLoadingTable  TableID
+	shardLoadingTable TableID
 	TableID
 }
 
@@ -26,29 +29,29 @@ func (strategy *distStrategyType) Load(format string, pending string) {
 
 	nsec := time.Now().UnixNano()
 
-	distLoadingTable := &tableIDType{
+	strategy.distLoadingTable = &tableIDType{
 		db:   strategy.Db(),
 		name: fmt.Sprintf("%s%d", strategy.getLoadingPrefix(), nsec),
 	}
 
-	shardLoadingTable := &tableIDType{
+	strategy.shardLoadingTable = &tableIDType{
 		db:   strategy.shard.Db(),
 		name: fmt.Sprintf("%s%d", strategy.shard.getLoadingPrefix(), nsec),
 	}
 
-	pendingLoadShardTables := getPendingTables(strategy.server, strategy.shard)
-	pendingLoadDistTables := getPendingTables(strategy.server, strategy)
+	pendingLoadShardTables := strategy.server.getPendingTables(strategy.shard)
+	pendingLoadDistTables := strategy.server.getPendingTables(strategy)
 
 	if len(pendingLoadDistTables) > 0 || len(pendingLoadShardTables) > 0 {
 		switch pending {
 		case StopOption:
 			stop()
 		case DeleteOption:
-			dropLoadingTablesDist(strategy.server, pendingLoadShardTables, strategy.cluster) // first remove shards
-			dropLoadingTablesDist(strategy.server, pendingLoadDistTables, strategy.cluster)  // later remove distributed
+			strategy.server.dropTablesDist(pendingLoadShardTables, strategy.cluster) // first remove shards
+			strategy.server.dropTablesDist(pendingLoadDistTables, strategy.cluster)  // later remove distributed
 		case ProcessOption:
-			processPendingTablesDist(strategy.server, strategy.shard, pendingLoadShardTables, strategy.cluster, strategy.clusterNodes)
-			dropLoadingTablesDist(strategy.server, pendingLoadDistTables, strategy.cluster) // distributed don't require processing, just remove
+			strategy.processPendingTablesDist(pendingLoadShardTables)
+			strategy.server.dropTablesDist(pendingLoadDistTables, strategy.cluster) // distributed don't require processing, just remove
 		}
 	}
 
@@ -56,37 +59,77 @@ func (strategy *distStrategyType) Load(format string, pending string) {
 
 	engineShard := strategy.server.getEngine(strategy.shard)
 	engineShard = getEngineLoading(string(engineShard))
-	strategy.server.Exec(fmt.Sprintf("CREATE TABLE %s.%s ON CLUSTER %s AS %s.%s ENGINE=%s", shardLoadingTable.Db(), shardLoadingTable.Name(), strategy.cluster, strategy.shard.Db(), strategy.shard.Name(), engineShard))
+	strategy.server.Exec(fmt.Sprintf("CREATE TABLE %s.%s ON CLUSTER %s AS %s.%s ENGINE=%s", strategy.shardLoadingTable.Db(), strategy.shardLoadingTable.Name(), strategy.cluster, strategy.shard.Db(), strategy.shard.Name(), engineShard))
 
 	if strategy.shardingKey != "" {
 		strategy.server.Exec(fmt.Sprintf("CREATE TABLE %s.%s ON CLUSTER %s AS %s.%s ENGINE=Distributed(%s,%s,%s,%s)",
-			distLoadingTable.Db(),
-			distLoadingTable.Name(),
+			strategy.distLoadingTable.Db(),
+			strategy.distLoadingTable.Name(),
 			strategy.cluster,
 			strategy.Db(),
 			strategy.Name(),
 			strategy.cluster,
-			shardLoadingTable.Db(),
-			shardLoadingTable.Name(),
+			strategy.shardLoadingTable.Db(),
+			strategy.shardLoadingTable.Name(),
 			strategy.shardingKey))
 	} else {
 		strategy.server.Exec(fmt.Sprintf("CREATE TABLE %s.%s ON CLUSTER %s AS %s.%s ENGINE=Distributed(%s,%s,%s)",
-			distLoadingTable.Db(),
-			distLoadingTable.Name(),
+			strategy.distLoadingTable.Db(),
+			strategy.distLoadingTable.Name(),
 			strategy.cluster,
 			strategy.Db(),
 			strategy.Name(),
 			strategy.cluster,
-			shardLoadingTable.Db(),
-			shardLoadingTable.Name()))
+			strategy.shardLoadingTable.Db(),
+			strategy.shardLoadingTable.Name()))
 	}
 
-	strategy.server.Pipe(fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", distLoadingTable.Db(), distLoadingTable.Name(), format))
+	strategy.server.Pipe(fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", strategy.distLoadingTable.Db(), strategy.distLoadingTable.Name(), format))
 
-	movePartitionsToFinalTableDist(strategy.server, shardLoadingTable, strategy.shard, strategy.cluster, strategy.clusterNodes)
+	strategy.movePartitionsToFinalTableDist(strategy.shardLoadingTable)
 
-	dropLoadingTablesDist(strategy.server, []TableID{distLoadingTable}, strategy.cluster)
-	dropLoadingTablesDist(strategy.server, []TableID{shardLoadingTable}, strategy.cluster)
+	strategy.server.dropTablesDist([]TableID{strategy.distLoadingTable}, strategy.cluster)
+	strategy.server.dropTablesDist([]TableID{strategy.shardLoadingTable}, strategy.cluster)
+}
+
+func (strategy *distStrategyType) processPendingTablesDist(pendingTables []TableID) {
+	for _, pendingTable := range pendingTables {
+		strategy.movePartitionsToFinalTableDist(pendingTable)
+		strategy.server.dropTableOnCluster(pendingTable, strategy.cluster)
+	}
+}
+
+func (strategy *distStrategyType) movePartitionsToFinalTableDist(pendingID TableID) {
+	partitions := getPartitionsOnCluster(strategy.server, pendingID, strategy.cluster)
+
+	workers := &workersType{}
+	workers.start(10)
+
+	for _, node := range strategy.clusterNodes {
+		for _, partID := range partitions {
+			attachQuery := fmt.Sprintf("ALTER TABLE %s.%s ATTACH PARTITION ID '%s' FROM %s.%s", strategy.shard.Db(), strategy.shard.Name(), partID, pendingID.Db(), pendingID.Name())
+			dropQuery := fmt.Sprintf("ALTER TABLE %s.%s DROP PARTITION ID '%s'", pendingID.Db(), pendingID.Name(), partID)
+
+			workers.sendCommand(&commandType{
+				node:  node,
+				query: []string{attachQuery, dropQuery},
+			})
+		}
+	}
+
+	close(workers.input)
+	failedCommands := workers.getFailedCommands()
+
+	if len(failedCommands) > 0 {
+		for _, response := range failedCommands {
+			log.Printf("--@%s", response.node())
+			log.Printf("%s", response.query())
+			log.Printf("%s", response.err())
+		}
+		os.Exit(-1)
+	} else {
+		log.Printf("-- Moved partitions to final table on cluster without errors")
+	}
 }
 
 func (strategy *distStrategyType) parseDistributedParams() {

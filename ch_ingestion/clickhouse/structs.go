@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"bufio"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -194,6 +195,46 @@ func (ch clickhouseType) cmdWithStderr(query string, setStderr bool) (cmd *exec.
 		cmd.Stderr = os.Stderr
 	}
 	return
+}
+
+func (ch clickhouseType) getPendingTables(tableID TableID) (res []TableID) {
+	query := fmt.Sprintf("SHOW TABLES IN %s LIKE '%s%%' FORMAT TSV", tableID.Db(), tableID.getLoadingPrefix())
+	pendingLoadTables := ch.Result(query)
+
+	if pendingLoadTables != "" {
+		res = make([]TableID, 0, 5)
+		scanner := bufio.NewScanner(strings.NewReader(pendingLoadTables))
+		for scanner.Scan() {
+			res = append(res, &tableIDType{
+				db:   tableID.Db(),
+				name: scanner.Text(),
+			})
+		}
+	}
+
+	return
+}
+
+func (ch clickhouseType) dropTables(tables []TableID) {
+	ch.dropTablesDist(tables, "")
+}
+
+func (ch clickhouseType) dropTablesDist(tables []TableID, cluster string) {
+	for _, table := range tables {
+		ch.dropTableOnCluster(table, cluster)
+	}
+}
+
+func (ch clickhouseType) dropTable(tableID TableID) {
+	ch.dropTableOnCluster(tableID, "")
+}
+
+func (ch clickhouseType) dropTableOnCluster(tableID TableID, cluster string) {
+	if cluster != "" {
+		ch.Exec(fmt.Sprintf("DROP TABLE %s.%s ON CLUSTER %s", tableID.Db(), tableID.Name(), cluster))
+	} else {
+		ch.Exec(fmt.Sprintf("DROP TABLE %s.%s", tableID.Db(), tableID.Name()))
+	}
 }
 
 func (ch clickhouseType) getEngine(tbl TableID) string {
