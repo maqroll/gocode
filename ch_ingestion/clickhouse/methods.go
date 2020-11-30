@@ -18,16 +18,15 @@ func NewTableID(db string, name string) TableID {
 }
 
 // NewClickhouse builds a new Clickhouse
-func NewClickhouse(host string, port uint, user string, pwd string) Clickhouse {
-	cli := []string{"docker", "exec", "-i", "clickhouse-cluster_clickhouse-ch3_1", "clickhouse-client"}
-	cli = append(cli, "-h", host, "--port", strconv.Itoa(int(port)))
+func NewClickhouse(host string, port uint, user string, pwd string, cli string) Clickhouse {
+	params := append(strings.Split(cli, " "), "-h", host, "--port", strconv.Itoa(int(port)))
 	return &clickhouseType{
 		host: host,
 		port: port,
 		user: user,
 		pwd:  pwd,
 		main: true,
-		cli:  cli,
+		cli:  params,
 	}
 }
 
