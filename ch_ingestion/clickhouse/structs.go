@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -172,7 +173,7 @@ type clickhouseType struct {
 	user string
 	pwd  string
 	main bool
-	cli  []string
+	cli  string
 }
 
 func (ch clickhouseType) printQuery(query string) {
@@ -189,7 +190,8 @@ func (ch clickhouseType) cmd(query string) (cmd *exec.Cmd) {
 }
 
 func (ch clickhouseType) cmdWithStderr(query string, setStderr bool) (cmd *exec.Cmd) {
-	cli := append(ch.cli, "-q", query)
+	cli := append(strings.Split(ch.cli, " "), "-h", ch.host, "--port", strconv.Itoa(int(ch.port)))
+	cli = append(cli, "-q", query)
 	cmd = exec.Command(cli[0], cli[1:]...)
 	if setStderr {
 		cmd.Stderr = os.Stderr

@@ -17,27 +17,45 @@ func NewTableID(db string, name string) TableID {
 	}
 }
 
-// NewClickhouse builds a new Clickhouse
-func NewClickhouse(host string, port uint, user string, pwd string, cli string) Clickhouse {
-	params := append(strings.Split(cli, " "), "-h", host, "--port", strconv.Itoa(int(port)))
+func newClickhouseType(host string, port uint, user string, pwd string, cli string) *clickhouseType {
 	return &clickhouseType{
 		host: host,
 		port: port,
 		user: user,
 		pwd:  pwd,
 		main: true,
-		cli:  params,
+		cli:  cli,
 	}
+}
+
+// NewClickhouse builds a new Clickhouse
+func NewClickhouse(host string, port uint, user string, pwd string, cli string) Clickhouse {
+	return newClickhouseType(host, port, user, pwd, cli)
 }
 
 // -----------------------------------------------------------------------------------
 
-func getPartitionsOnCluster(server Clickhouse, tableID TableID, cluster string) (res []string) {
+func expandCluster(cluster clusterInfo) string {
+	clusterExpanded := &strings.Builder{}
+	for i, node := range cluster {
+		if i != 0 {
+			clusterExpanded.WriteString(",")
+		}
+		clusterExpanded.WriteString(node.hostName)
+		clusterExpanded.WriteString(":")
+		clusterExpanded.WriteString(strconv.Itoa(int(node.port)))
+	}
+
+	return clusterExpanded.String()
+}
+
+func getPartitionsOnCluster(server *clickhouseType, tableID TableID, cluster clusterInfo) (res []string) {
 	query := ""
-	if cluster == "" {
+	if cluster == nil {
 		query = fmt.Sprintf("SELECT distinct(partition_id) AS partition FROM system.parts WHERE database='%s' AND table='%s' AND active=1 FORMAT TSV", tableID.Db(), tableID.Name())
 	} else {
-		query = fmt.Sprintf("SELECT distinct(partition_id) AS partition FROM cluster('%s',system.parts) WHERE database='%s' AND table='%s' AND active=1 FORMAT TSV", cluster, tableID.Db(), tableID.Name())
+		clusterExpanded := expandCluster(cluster)
+		query = fmt.Sprintf("SELECT distinct(partition_id) AS partition FROM remote('%s',system.parts,'%s','%s') WHERE database='%s' AND table='%s' AND active=1 FORMAT TSV", clusterExpanded, server.user, server.pwd, tableID.Db(), tableID.Name())
 	}
 
 	partitions := server.Result(query)
@@ -53,8 +71,8 @@ func getPartitionsOnCluster(server Clickhouse, tableID TableID, cluster string) 
 	return
 }
 
-func getPartitions(server Clickhouse, tableID TableID) (res []string) {
-	return getPartitionsOnCluster(server, tableID, "")
+func getPartitions(server *clickhouseType, tableID TableID) (res []string) {
+	return getPartitionsOnCluster(server, tableID, nil)
 }
 
 func getEngineLoading(engineShard string) (engineLoading string) {

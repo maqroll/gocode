@@ -85,6 +85,7 @@ func (strategy *distStrategyType) Load(format string, pending string) {
 	}
 
 	strategy.server.Pipe(fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", strategy.distLoadingTable.Db(), strategy.distLoadingTable.Name(), format))
+	strategy.server.Exec(fmt.Sprintf("SYSTEM FLUSH DISTRIBUTED %s.%s", strategy.distLoadingTable.Db(), strategy.distLoadingTable.Name()))
 
 	strategy.movePartitionsToFinalTableDist(strategy.shardLoadingTable)
 
@@ -100,10 +101,10 @@ func (strategy *distStrategyType) processPendingTablesDist(pendingTables []Table
 }
 
 func (strategy *distStrategyType) movePartitionsToFinalTableDist(pendingID TableID) {
-	partitions := getPartitionsOnCluster(strategy.server, pendingID, strategy.cluster)
+	partitions := getPartitionsOnCluster(strategy.server, pendingID, strategy.clusterNodes)
 
 	workers := &workersType{}
-	workers.start(10)
+	workers.start(30)
 
 	for _, node := range strategy.clusterNodes {
 		for _, partID := range partitions {
@@ -122,7 +123,7 @@ func (strategy *distStrategyType) movePartitionsToFinalTableDist(pendingID Table
 
 	if len(failedCommands) > 0 {
 		for _, response := range failedCommands {
-			log.Printf("--@%s", response.node())
+			log.Printf("--@ %s", response.node())
 			log.Printf("%s", response.query())
 			log.Printf("%s", response.err())
 		}
@@ -192,6 +193,7 @@ func (strategy *distStrategyType) populateClusterInfo() {
 				user: strategy.server.user,
 				pwd:  strategy.server.pwd,
 				main: false,
+				cli:  strategy.server.cli,
 			},
 		}
 		strategy.clusterNodes = append(strategy.clusterNodes, node)
