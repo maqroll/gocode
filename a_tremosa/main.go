@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	ch "github.com/maqroll/gocode/ch_ingestion/clickhouse"
+	ch "github.com/maqroll/gocode/a_tremosa/clickhouse"
 )
 
 var (
@@ -25,7 +25,7 @@ var (
 func init() {
 	log.SetFlags(0)
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Pipe your input file into ch_ingestion and it will try to update your table atomically. 
+		fmt.Fprintf(os.Stderr, `Pipe your input file into ch_ingestion and it will try to update your table in a fault-tolerant way. 
 If something goes wrong will stop the ingestion and will show the faulty command.
 
 Params:
